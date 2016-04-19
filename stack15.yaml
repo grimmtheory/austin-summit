@@ -1,0 +1,207 @@
+heat_template_version: 2013-05-23
+
+description: Deploys and configures a SLURM controller and SLURM nodes
+
+parameters:
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for compute instance
+    default: CentOS-7-x86_64-GenericCloud
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used
+    default: m1.medium
+  key_name:
+    type: string
+    label: Key name
+    description: Name of key-pair to be used for compute instance
+    default: k1
+  public_network_id:
+    type: string
+    label: Public network ID
+    description: Public network with floating IP addresses.
+    default: c43b71a1-19e0-47b9-ba49-5677804ec144
+  private_network_id:
+    type: string
+    label: Private network ID
+    description: Network to attach instance to.
+    default: ec484c11-6627-4612-b159-44c2570289eb
+  private_subnet_id:
+    type: string
+    description: ID of private sub network into which servers get deployed
+    default: 59903018-38f6-4b7e-bafe-a979d8c95f8a
+
+resources:
+  slurm_controller_instance:
+    type: OS::Nova::Server
+    properties:
+      name: slurm_controller
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - port: { get_resource: slurm_controller_port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $SLURM_CONTROLLER_IP: { get_attr: [ slurm_controller_floating_ip, floating_ip_address ] }
+          template: |
+            #!/bin/sh
+            # Basic cloud-init testing
+            echo "Hello, World!" >> /root/ci.out
+            yum -y install httpd
+            systemctl enable httpd
+            systemctl start httpd; sleep 5
+            systemctl status httpd >> /root/ci.out
+            echo SLURM Controller IP is $SLURM_CONTROLLER_IP >> /root/ci.out
+            # Begin slurm install
+            SLURM_INSTALL_LOG="/root/slurm.out"
+            echo "# Install Slurm" >> $SLURM_INSTALL_LOG
+            # Users and Groups
+            echo "# Setup Users and Groups" >> $SLURM_INSTALL_LOG
+            export MUNGEUSER=991
+            groupadd -g $MUNGEUSER munge
+            useradd -m -c "MUNGE Uid 'N' Gid Emporium" -d /var/lib/munge -u $MUNGEUSER -g munge -s /sbin/nologin munge
+            export SLURMUSER=992
+            groupadd -g $SLURMUSER slurm
+            useradd -m -c "SLURM workload manager" -d /var/lib/slurm -u $SLURMUSER -g slurm -s /bin/bash slurm
+            grep -i slurm /etc/passwd >> $SLURM_INSTALL_LOG
+            grep -i slurm /etc/group >> $SLURM_INSTALL_LOG
+            grep -i munge /etc/passwd >> $SLURM_INSTALL_LOG
+            grep -i munge /etc/group >> $SLURM_INSTALL_LOG
+            # Install Munge
+            echo "# Install Munge" >> $SLURM_INSTALL_LOG
+            yum -y install epel-release; sleep 10
+            yum -y install munge munge-libs munge-devel; sleep 15
+            yum list | grep -i munge >> $SLURM_INSTALL_LOG
+            # Configure Munge
+            echo "# Configure Munge" >> $SLURM_INSTALL_LOG
+            /bin/munge -C >> $SLURM_INSTALL_LOG
+            /bin/munge -M >> $SLURM_INSTALL_LOG
+            echo "# Create Munge Key" >> $SLURM_INSTALL_LOG
+            /sbin/create-munge-key -f
+            echo "# Set Munge Permissions" >> $SLURM_INSTALL_LOG
+            chown munge: /etc/munge/munge.key
+            chmod 400 /etc/munge/munge.key
+            chown -R munge: /etc/munge/ /var/log/munge/
+            chmod 0700 /etc/munge/ /var/log/munge/
+            ls -lah /etc/munge >> $SLURM_INSTALL_LOG
+            ls -lah /var/log/munge >> $SLURM_INSTALL_LOG
+            echo "# Start Munge" >> $SLURM_INSTALL_LOG
+            systemctl enable munge; sleep 5
+            systemctl start munge; sleep 15
+            systemctl status munge >> $SLURM_INSTALL_LOG
+            # Email SLURM Controller Link
+            yum -y install mutt; sleep 15
+            touch /var/spool/mail/root
+            touch /root/Mail
+            HOST_IP=`echo $SLURM_CONTROLLER_IP | awk -F. '{ print $1 "-" $2 "-" $3 "-" $4 }'`
+            NEW_HOSTNAME="slurm-controller-$HOST_IP"
+            hostname $NEW_HOSTNAME.brothergrimm.com
+            echo $NEW_HOSTNAME.brothergrimm.com > /etc/hostname
+            hostnamectl set-hostname $NEW_HOSTNAME.brothergrimm.com --static
+            echo "127.0.0.1 $NEW_HOSTNAME $NEW_HOSTNAME.brothergrimm.com" >> /etc/hosts
+            echo "$SLURM_CONTROLLER_IP $NEW_HOSTNAME $NEW_HOSTNAME.brothergrimm.com" >> /etc/hosts
+            echo $NEW_HOSTNAME >> $SLURM_INSTALL_LOG
+            echo $NEW_HOSTNAME >> /root/ci.out
+            echo "SLURM Controller URL is http://$SLURM_CONTROLLER_IP" | mutt -s "Automated Heat Message from $NEW_HOSTNAME.brothergrimm.com" jasgrimm@cisco.com
+
+  slurm_controller_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_network_id }
+      fixed_ips:
+        - subnet_id: { get_param: private_subnet_id }
+      security_groups: [ default, { get_resource: slurm_security_group } ]
+
+  slurm_controller_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: public_network_id }
+      port_id: { get_resource: slurm_controller_port }
+
+  slurm_security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: slurm_security_group
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: icmp
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 6817
+          port_range_max: 6818
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 7321
+          port_range_max: 7321
+
+  slurm_node1_instance:
+    type: OS::Nova::Server
+    properties:
+      security_groups: [{ get_resource: slurm_security_group }]
+      name: slurm_node1
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - network: { get_param: private_network_id }
+
+  slurm_node2_instance:
+    type: OS::Nova::Server
+    properties:
+      security_groups:
+        - { get_resource: slurm_security_group }
+      name: slurm_node2
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - network: { get_param: private_network_id }
+
+  slurm_node3_instance:
+    type: OS::Nova::Server
+    properties:
+      security_groups:
+        - { get_resource: slurm_security_group }
+      name: slurm_node3
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - network: { get_param: private_network_id }
+
+outputs:
+  slurm_controller_instance_name:
+    description: Name of the instance
+    value: { get_attr: [slurm_controller_instance, name] }
+  slurm_controller_private_ip:
+    description: IP address of the instance
+    value: { get_attr: [slurm_controller_instance, first_address] }
+  slurm_controller_floating_ip:
+    description: The floating IP address of the deployed instance
+    value: { get_attr: [slurm_controller_floating_ip, floating_ip_address] }
+  slurm_node1_private_ip:
+    description: IP address of the instance
+    value: { get_attr: [slurm_node1_instance, first_address] }
+  slurm_node2_private_ip:
+    description: IP address of the instance
+    value: { get_attr: [slurm_node2_instance, first_address] }
+  slurm_node3_private_ip:
+    description: IP address of the instance
+    value: { get_attr: [slurm_node3_instance, first_address] }
