@@ -1,0 +1,197 @@
+heat_template_version: 2013-05-23
+
+description: Deploys and configures some docker enabled instances
+
+parameters:
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for compute instance
+    default: CentOS-7-x86_64-GenericCloud-1508-mc
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used
+    default: m1.large
+  key_name:
+    type: string
+    label: Key name
+    description: Name of key-pair to be used for compute instance
+    default: collegeboard-keypair
+  public_network_id:
+    type: string
+    label: Public network ID
+    description: Public network with floating IP addresses.
+    default: 71db85cf-5b5d-4d49-9272-f02015d6e403
+  private_network_id:
+    type: string
+    label: Private network ID
+    description: Network to attach instance to.
+    default: 5da95b9b-ab91-4967-9294-ee7a8c65b720
+  private_subnet_id:
+    type: string
+    description: ID of private sub network into which servers get deployed
+    default: 87b4365a-a0c6-4e31-a894-78df6187c105
+
+resources:
+  dockerinstance1:
+    type: OS::Nova::Server
+    properties:
+      name: docker-instance-1
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - port: { get_resource: dockerinstance1_port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $DOCKER_INSTANCE_1_IP: { get_attr: [ dockerinstance1_floating_ip, floating_ip_address ] }
+          template: |
+            #!/bin/sh
+            yum -y update
+            curl -fsSL https://get.docker.com/ | sh
+            service docker start
+            docker run hello-world
+
+  dockerinstance1_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_network_id }
+      fixed_ips:
+        - subnet_id: { get_param: private_subnet_id }
+      security_groups: [ default, { get_resource: docker_security_group } ]
+
+  dockerinstance1_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: public_network_id }
+      port_id: { get_resource: dockerinstance1_port }
+
+  dockerinstance2:
+    type: OS::Nova::Server
+    properties:
+      name: docker-instance-2
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - port: { get_resource: dockerinstance2_port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $DOCKER_INSTANCE_1_IP: { get_attr: [ dockerinstance2_floating_ip, floating_ip_address ] }
+          template: |
+            #!/bin/sh
+            yum -y update
+            curl -fsSL https://get.docker.com/ | sh
+            service docker start
+            docker run hello-world
+
+  dockerinstance2_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_network_id }
+      fixed_ips:
+        - subnet_id: { get_param: private_subnet_id }
+      security_groups: [ default, { get_resource: docker_security_group } ]
+
+  dockerinstance2_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: public_network_id }
+      port_id: { get_resource: dockerinstance2_port }
+
+  dockerinstance3:
+    type: OS::Nova::Server
+    properties:
+      name: docker-instance-3
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key_name }
+      networks:
+        - port: { get_resource: dockerinstance3_port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          params:
+            $DOCKER_INSTANCE_1_IP: { get_attr: [ dockerinstance3_floating_ip, floating_ip_address ] }
+          template: |
+            #!/bin/sh
+            yum -y update
+            curl -fsSL https://get.docker.com/ | sh
+            service docker start
+            docker run hello-world
+
+  dockerinstance3_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_network_id }
+      fixed_ips:
+        - subnet_id: { get_param: private_subnet_id }
+      security_groups: [ default, { get_resource: docker_security_group } ]
+
+  dockerinstance3_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: public_network_id }
+      port_id: { get_resource: dockerinstance3_port }
+
+  docker_security_group:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: docker-security-group
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: icmp
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 8080
+          port_range_max: 8080
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 8888
+          port_range_max: 8888
+
+outputs:
+  dockerinstance1_instance_name:
+    description: Name of the instance
+    value: { get_attr: [dockerinstance1, name] }
+  dockerinstance1_private_ip:
+    description: IP address of the instance
+    value: { get_attr: [dockerinstance1, first_address] }
+  dockerinstance1_floating_ip:
+    description: The floating IP address of the deployed instance
+    value: { get_attr: [dockerinstance1_floating_ip, floating_ip_address] }
+  dockerinstance2_instance_name:
+    description: Name of the instance
+    value: { get_attr: [dockerinstance1, name] }
+  dockerinstance2_private_ip:
+    description: IP address of the instance
+    value: { get_attr: [dockerinstance1, first_address] }
+  dockerinstance2_floating_ip:
+    description: The floating IP address of the deployed instance
+    value: { get_attr: [dockerinstance1_floating_ip, floating_ip_address] }
+  dockerinstance3_instance_name:
+    description: Name of the instance
+    value: { get_attr: [dockerinstance1, name] }
+  dockerinstance3_private_ip:
+    description: IP address of the instance
+    value: { get_attr: [dockerinstance1, first_address] }
+  dockerinstance3_floating_ip:
+    description: The floating IP address of the deployed instance
+    value: { get_attr: [dockerinstance1_floating_ip, floating_ip_address] }
