@@ -6,6 +6,8 @@ clear
 # KEY_NAME = your key
 # FLAVOR =
 ## cloudpharma = 6 core x 4 gb ram - 366766f9-6e82-464f-9418-4ab284d82462 
+## m1.small = 1 core x 2 gb ram - e0e3d365-f495-43f9-b0ea-7037ea337576
+## m1.medium = 2 core x 4 gb ram - 2c8f5c26-9ecb-4351-b11e-8a3008e7a53e
 ## m1.xlarge = 8 core x 16 gb ram - 9c6460db-ba32-4dfa-ae11-ab946ff6eaf2
 ## m1.xxlarge = 16 core x 16 gb ram - 7cbbfa6a-c515-40e6-932a-fc0cb73d8cf8
 ## m1.xxxlarge = 32 core x 16 gb ram - bfc7222b-98e5-458b-adb9-26b7165bbf97
@@ -18,13 +20,14 @@ clear
 
 CREDS="./credrc-cusps1"
 KEY_NAME="jtg-keypair"
-FLAVOR="366766f9-6e82-464f-9418-4ab284d82462"
+FLAVOR="e0e3d365-f495-43f9-b0ea-7037ea337576"
 IMAGE="8b07434f-c161-4cd4-a61b-b80722217c7e"
 NET_ID="efe53604-adcf-4914-a267-b3b08f204e2d"
 AVAILABILITY_ZONE="cusps1:mhv2.cusps1.pv.metacloud.in"
-COUNT=6
+COUNT=60
 MACHINE_NAME="cloudpharma-hpctest"
 USER_DATA="./user_data.file"
+RUN_NAME="60x1x2"
 
 cat <<'EOF' > $USER_DATA
 #!/bin/bash
@@ -60,7 +63,7 @@ cp execution_time.txt $HOME/.
 cd $HOME
 cat <<'KEY' > ./key.pem
 -----BEGIN RSA PRIVATE KEY-----
-PUT YOUR KEY HERE
+PUT RSA KEY HERE
 -----END RSA PRIVATE KEY-----
 KEY
 chmod 400 ./key.pem
@@ -74,8 +77,15 @@ counter=1
 while [ $counter -le $COUNT ]; do
 nova boot --key-name $KEY_NAME --flavor $FLAVOR --image $IMAGE --nic net-id=$NET_ID --availability-zone $AVAILABILITY_ZONE --user-data $USER_DATA $MACHINE_NAME-$counter
 counter=$(( $counter + 1 ))
+sleep 10
 done
 
+# Check progress
+sleep 10
 nova list
 
+# Cleanup
+rm -rf $USER_DATA
+
+# Exit
 exit 0
